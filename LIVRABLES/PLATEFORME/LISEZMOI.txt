@@ -1,0 +1,55 @@
+ATLAS DES LOTISSEMENTS - Marcory et Bingerville
+================================================
+
+Ouvrir la plateforme (avec ou sans connexion)
+  Double-cliquer sur index.html (Chrome, Edge ou Firefox).
+  Le dossier est autonome : la bibliothèque cartographique, les polices et les étiquettes de la
+  carte sont dans lib\. Pour l'utiliser ailleurs ou sans internet, copier le dossier PLATEFORME
+  en entier (environ 8 Mo) sur une clé USB ou un autre ordinateur, puis ouvrir index.html.
+  Sans connexion : îlots, lots, limites, chevauchements, recherche, filtres, fiches et tableau
+  fonctionnent normalement. Seuls les fonds de carte Plan et Satellite (Esri) demandent internet :
+  ils sont alors grisés et la carte passe sur « Aucun ». Avec internet, ils reviennent d'eux-mêmes.
+
+Contenu
+  index.html   application (carte, recherche, filtres, fiche d'un plan, tableau des plans)
+  data/        données de la carte : plans, limites, îlots, lots, chevauchements, limites communales
+               (WGS 84, EPSG:4326), générées à partir de la couche d'assemblage marcory_bingerville.gpkg
+               par PROJET_QGIS\mettre_a_jour_plateforme.bat
+  lib/         MapLibre GL JS 4.7.1, polices (Barlow, IBM Plex Mono), glyphes « Open Sans Semibold »
+  img/         logo ANKO Technology
+
+Ce que la plateforme indique pour chaque lotissement
+  - Type : Normale ou Régularisation.
+  - Conformité : Conforme (oui) ou Non conforme. Sur la carte, la limite d'un lotissement non
+    conforme est tracée en tirets.
+  - Chevauchement : lotissements qui se recouvrent. Zones hachurées orange sur la carte ; la fiche
+    de chaque plan liste les lotissements concernés, la surface commune, le nombre de lots qui se
+    superposent, avec un lien « Voir la zone sur la carte ».
+
+Utilisation
+  - Recherche : lotissement, localité, sous-préfecture, n° d'édition (« non conforme » et
+    « chevauchement » fonctionnent aussi comme mots de recherche).
+  - Filtres : commune, type de plan, lotissement conforme (Oui / Non), se chevauche (Oui / Non).
+    Chaque bouton affiche le nombre de plans obtenus avec les autres filtres déjà appliqués.
+  - Clic sur un plan (liste ou carte) : fiche avec métadonnées, conformité, polygonale, contrôles
+    et chevauchements. Clic sur la carte : information sur le lot, l'îlot, le plan ou la zone de
+    chevauchement.
+  - Bouton « Tableau des plans » : tableau triable (type, conforme, polygonale, chevauchements), export CSV.
+  - Légende : cases à cocher pour îlots, lots, limites, limites de commune, chevauchements, étiquettes ;
+    fonds Plan / Satellite / Aucun.
+  - Étiquettes des lots : visibles à partir d'un zoom d'environ 17.
+
+Liens directs (paramètres d'URL)
+  index.html?commune=MARCORY&plan=13
+  index.html?conforme=non
+  index.html?chev=oui&type=Régularisation
+  index.html?commune=BINGERVILLE&type=Normale&q=lagunes
+  index.html?plan=5&ll=-3.9794,5.3040&z=18&base=sat
+  index.html?table=1
+
+Couleurs : îlot vert, lot rouge, limite de lotissement violette (tirets si non conforme),
+chevauchement orange hachuré (noms du 1er et du 2e lotissement en bleu et en rouge),
+limite de commune en tirets noirs.
+Les lots d'un même îlot sont regroupés pour dessiner l'îlot ; les polygones filiformes
+(artefacts de conversion) sont écartés de la carte. Les lots présents dans deux lotissements
+sont conservés dans chacun (ils sont signalés comme chevauchement).

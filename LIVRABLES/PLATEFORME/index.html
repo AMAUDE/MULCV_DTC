@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CARTOGRAPHIE DES LOTISSEMENTS</title>
+<!-- polices, bibliothèque cartographique et glyphes sont dans lib/ : la plateforme s'ouvre sans connexion (seuls les fonds Esri en ont besoin) -->
+<link rel="stylesheet" href="lib/fonts.css">
+<link rel="stylesheet" href="lib/maplibre-gl.css">
+<style>
+/* Concept : bureau de topographie. Un panneau de dossier a gauche (liste, fiche, filtres),
+   la carte occupe le reste ; les trois couleurs de donnees (ilot vert, lot rouge, limite violette)
+   sont reservees a la carte, l'interface reste bleu-gris neutre. */
+:root{
+  --bg:#EDF1EF; --panel:#FFFFFF; --panel-2:#F5F8F6; --ink:#14231E; --muted:#58696A; --line:#D9E1DD;
+  --accent:#227552; --accent-ink:#FFFFFF; --accent-soft:#E1F1E8;
+  --reg:#8A4F00; --reg-bg:#FFEFD0; --nor:#227552; --nor-bg:#E1F1E8;
+  --ok:#1D7A45; --warn:#8A4F00; --err:#B3261E; --info:#4A5D6A;
+  --ilot:#2E9B4A; --lot:#D8362F; --limite:#7A2FBF; --commune:#1F2A37; --chev:#E8750A;
+  --shadow:0 1px 2px rgba(20,35,30,.08),0 8px 28px rgba(20,35,30,.12);
+  --font-ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-display:"Barlow Semi Condensed","Barlow",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --panel-w:392px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F1715; --panel:#16211E; --panel-2:#1B2825; --ink:#E6EFEC; --muted:#93A59F; --line:#2B3B36;
+  --accent:#7FD1A6; --accent-ink:#0F1715; --accent-soft:#1F3B2F;
+  --reg:#F2B866; --reg-bg:#3A2A10; --nor:#7FD1A6; --nor-bg:#17382B;
+  --ok:#6FD39A; --warn:#F2B866; --err:#FF8F86; --info:#9DB0BB;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.45); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1715; --panel:#16211E; --panel-2:#1B2825; --ink:#E6EFEC; --muted:#93A59F; --line:#2B3B36;
+  --accent:#7FD1A6; --accent-ink:#0F1715; --accent-soft:#1F3B2F;
+  --reg:#F2B866; --reg-bg:#3A2A10; --nor:#7FD1A6; --nor-bg:#17382B;
+  --ok:#6FD39A; --warn:#F2B866; --err:#FF8F86; --info:#9DB0BB;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.45); color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:400 14px/1.45 var(--font-ui);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+.app{display:grid;grid-template-columns:var(--panel-w) minmax(0,1fr);height:100%}
+.panel{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0;z-index:5}
+.mapwrap{position:relative;min-width:0;min-height:0}
+#map{position:absolute;inset:0}
+
+/* ---- en-tete ---- */
+.brand{display:flex;gap:12px;align-items:center;padding:16px 18px 12px;padding-left:max(18px,env(safe-area-inset-left,0px))}
+.brand .logo{flex:none;height:48px;width:auto;display:block}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .brand .logo{filter:brightness(0) invert(1)}}
+:root[data-theme="dark"] .brand .logo{filter:brightness(0) invert(1)}
+.brand h1{margin:0;font:700 22px/1.1 var(--font-display);letter-spacing:.01em;text-wrap:balance}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-block:1px solid var(--line)}
+.kpis div{background:var(--panel);padding:9px 18px}
+.kpis b{display:block;font:600 20px/1.1 var(--font-mono);font-variant-numeric:tabular-nums}
+.kpis span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+
+/* ---- filtres ---- */
+.tools{padding:12px 18px 10px;display:grid;gap:10px;border-bottom:1px solid var(--line)}
+.search{position:relative}
+.search input{width:100%;height:38px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--ink);padding:0 12px 0 36px;font:inherit}
+.search input::placeholder{color:var(--muted)}
+.search svg{position:absolute;left:11px;top:10px;color:var(--muted)}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel-2)}
+.seg button{flex:1;border:0;background:transparent;padding:7px 4px;font-size:13px;color:var(--muted);border-right:1px solid var(--line);white-space:nowrap}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.seg .cnt{font:500 11px/1 var(--font-mono);opacity:.75;margin-left:3px}
+.seg-label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.list-head{display:flex;justify-content:space-between;align-items:center;padding:8px 18px;color:var(--muted);font-size:12.5px;border-bottom:1px solid var(--line)}
+.linkbtn{border:1px solid var(--line);background:var(--panel-2);border-radius:6px;padding:5px 10px;font-size:12.5px;font-weight:500}
+.linkbtn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ---- liste ---- */
+.plans{list-style:none;margin:0;padding:0;overflow:auto;flex:1;min-height:0}
+.plan{display:grid;gap:3px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:var(--panel);padding:11px 18px}
+.plan:hover{background:var(--panel-2)}
+.plan[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.plan-name{font:600 15px/1.2 var(--font-display);letter-spacing:.01em}
+.plan-sub{color:var(--muted);font-size:12.5px}
+.plan-meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12px;color:var(--muted);margin-top:2px}
+.badge{display:inline-block;border-radius:4px;padding:1px 7px;font-size:11.5px;font-weight:600;letter-spacing:.02em}
+.badge.reg{background:var(--reg-bg);color:var(--reg)}
+.badge.nor{background:var(--nor-bg);color:var(--nor)}
+.badge.alert{background:transparent;color:var(--err);border:1px solid currentColor}
+.badge.warn{background:transparent;color:var(--warn);border:1px solid currentColor}
+.badge.conf{background:transparent;color:var(--ok);border:1px solid currentColor}
+.badge.nconf{background:var(--err);color:#fff;border:1px solid var(--err)}
+.badge.chev{background:var(--chev);color:#fff}
+.empty{padding:28px 18px;color:var(--muted)}
+.foot{padding:8px 18px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line)}
+
+/* ---- fiche ---- */
+.detail{overflow:auto;flex:1;min-height:0;padding:12px 18px 18px}
+.back{border:0;background:none;color:var(--accent);padding:4px 0;font-weight:600}
+.detail h2{margin:6px 0 6px;font:700 24px/1.1 var(--font-display);text-wrap:balance}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{border:1px solid var(--line);border-radius:4px;padding:1px 8px;font-size:12px;color:var(--muted)}
+dl.meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:0;margin:0;border-top:1px solid var(--line)}
+dl.meta dt,dl.meta dd{margin:0;padding:7px 0;border-bottom:1px solid var(--line)}
+dl.meta dt{color:var(--muted);padding-right:16px;font-size:13px}
+dl.meta dd{font-weight:500;overflow-wrap:anywhere}
+.detail h3{margin:18px 0 6px;font:600 12px/1 var(--font-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.alerts{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.alerts li{display:grid;grid-template-columns:10px 1fr;gap:10px;align-items:start;font-size:13px}
+.alerts li::before{content:"";width:9px;height:9px;border-radius:50%;margin-top:5px;background:var(--info)}
+.alerts li.err::before{background:var(--err)} .alerts li.warn::before{background:var(--warn)} .alerts li.ok::before{background:var(--ok)}
+.chevlist{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.chevlist li{border:1px solid var(--line);border-left:4px solid var(--chev);border-radius:6px;padding:8px 10px;display:grid;gap:2px;background:var(--panel-2)}
+.chevlist a{color:var(--accent);font-weight:600;cursor:pointer}
+.chevlist .nm{font:600 14px/1.2 var(--font-display)}
+.chevlist .sub{font-size:12.5px;color:var(--muted)}
+.chevlist .zone{font-size:12.5px;font-weight:500}
+
+/* ---- carte : controles flottants ---- */
+.float{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}
+.legend{left:12px;bottom:34px;padding:10px 12px;min-width:206px;display:grid;gap:6px;left:max(12px,env(safe-area-inset-left,0px))}
+.legend h4{margin:0 0 2px;font:600 11.5px/1 var(--font-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.legend label{display:flex;gap:9px;align-items:center;font-size:13px;cursor:pointer}
+.legend input{accent-color:var(--accent);margin:0}
+.sw{width:22px;height:14px;border-radius:2px;flex:none;border:2px solid}
+.sw.ilot{border-color:var(--ilot);background:color-mix(in srgb,var(--ilot) 22%,transparent)}
+.sw.lot{border-color:var(--lot);background:color-mix(in srgb,var(--lot) 30%,transparent)}
+.sw.limite{border-color:var(--limite);background:transparent;border-width:3px}
+.sw.commune{border:0;border-top:2px dashed var(--commune);height:0;margin:6px 0}
+.sw.chev{border-color:var(--chev);background:repeating-linear-gradient(135deg,var(--chev) 0 2px,color-mix(in srgb,var(--chev) 14%,transparent) 2px 5px)}
+.sw.nc{border-style:dashed;background:transparent}
+.legend .key{display:flex;gap:9px;align-items:center;font-size:13px}
+.legend hr{border:0;border-top:1px solid var(--line);margin:2px 0;width:100%}
+.basemap{top:12px;right:12px;display:flex;overflow:hidden}
+.basemap button{border:0;border-right:1px solid var(--line);background:var(--panel);padding:7px 11px;font-size:13px;color:var(--muted)}
+.basemap button:last-child{border-right:0}
+.basemap button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.basemap button:disabled{opacity:.45;cursor:not-allowed}
+.ptoggle{display:none;top:12px;left:12px;padding:8px 12px;font-weight:600}
+.maplibregl-ctrl-top-right{top:52px}
+.maplibregl-popup-content{font:400 13px/1.4 var(--font-ui);padding:10px 12px;border-radius:8px;color:#14231E}
+.pop b{font-family:var(--font-display);font-size:15px}
+.pop a{color:#227552;font-weight:600;cursor:pointer}
+
+/* ---- tableau ---- */
+.tableview{position:absolute;inset:0;background:var(--bg);z-index:6;display:flex;flex-direction:column}
+.tableview[hidden]{display:none}
+.tv-head{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tv-head h2{margin:0;font:700 20px/1.1 var(--font-display)}
+.tv-head p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.tv-actions{display:flex;gap:8px}
+.tv-scroll{overflow:auto;flex:1;min-height:0}
+table{border-collapse:collapse;width:100%;min-width:1300px;background:var(--panel)}
+th,td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:13px}
+th{position:sticky;top:0;background:var(--panel-2);font:600 11.5px/1.2 var(--font-ui);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--line);z-index:1}
+th[aria-sort]::after{content:" ▲";font-size:9px}
+th[aria-sort="descending"]::after{content:" ▼"}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--panel-2)}
+td.n{font-family:var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.name{font-weight:600;font-family:var(--font-display);font-size:14px;min-width:230px}
+
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .panel{position:absolute;inset:0 auto 0 0;width:min(var(--panel-w),92vw);transform:translateX(-102%);transition:transform .2s;box-shadow:var(--shadow)}
+  .app.open .panel{transform:none}
+  .ptoggle{display:block}
+  .legend{bottom:28px;padding:8px 10px;gap:3px;min-width:0}
+  .legend label{font-size:12px;gap:7px}
+}
+@media (prefers-reduced-motion:reduce){.panel{transition:none}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="panel" id="panel" aria-label="Recherche et liste des lotissements">
+    <header class="brand">
+      <img class="logo" src="img/logo_anko.png" alt="ANKO Technology" width="98" height="48">
+      <div><h1>CARTOGRAPHIE DES LOTISSEMENTS</h1><p>Marcory et Bingerville </p></div>
+    </header>
+    <div class="kpis" aria-live="polite">
+      <div><b id="k-plans">–</b><span>plans</span></div>
+      <div><b id="k-lots">–</b><span>lots</span></div>
+      <div><b id="k-ilots">–</b><span>îlots</span></div>
+    </div>
+    <div class="tools">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
+        <input id="q" type="search" placeholder="Lotissement, localité, sous-préfecture…" autocomplete="off" aria-label="Rechercher un lotissement ou une localité">
+      </div>
+      <div><p class="seg-label">Commune</p>
+        <div class="seg" id="seg-commune" role="group" aria-label="Commune">
+          <button type="button" data-v="ALL" aria-pressed="true">Toutes</button>
+          <button type="button" data-v="MARCORY" aria-pressed="false">Marcory</button>
+          <button type="button" data-v="BINGERVILLE" aria-pressed="false">Bingerville</button>
+        </div></div>
+      <div><p class="seg-label">Type de plan</p>
+        <div class="seg" id="seg-type" role="group" aria-label="Type de plan">
+          <button type="button" data-v="ALL" aria-pressed="true">Tous</button>
+          <button type="button" data-v="Régularisation" aria-pressed="false">Régularisation</button>
+          <button type="button" data-v="Normale" aria-pressed="false">Normale</button>
+        </div></div>
+      <div class="row2">
+        <div><p class="seg-label">Lotissement conforme</p>
+          <div class="seg" id="seg-conforme" role="group" aria-label="Lotissement conforme">
+            <button type="button" data-v="ALL" aria-pressed="true">Tous</button>
+            <button type="button" data-v="oui" aria-pressed="false">Oui</button>
+            <button type="button" data-v="non" aria-pressed="false">Non</button>
+          </div></div>
+        <div><p class="seg-label">Se chevauche</p>
+          <div class="seg" id="seg-chev" role="group" aria-label="Lotissement qui se chevauche">
+            <button type="button" data-v="ALL" aria-pressed="true">Tous</button>
+            <button type="button" data-v="oui" aria-pressed="false">Oui</button>
+            <button type="button" data-v="non" aria-pressed="false">Non</button>
+          </div></div>
+      </div>
+    </div>
+    <div class="list-head" id="list-head"><span id="count">–</span><button class="linkbtn" id="btn-table" type="button">Tableau des plans</button></div>
+    <ul class="plans" id="list"></ul>
+    <section class="detail" id="detail" hidden></section>
+    <div class="foot">Plans DWG convertis avec Amaude (QGIS) · WGS 84 / UTM 30N</div>
+  </aside>
+
+  <main class="mapwrap">
+    <div id="map" role="application" aria-label="Carte des lotissements"></div>
+    <button class="float ptoggle" id="ptoggle" type="button">☰ Lotissements</button>
+    <div class="float basemap" id="basemap" role="group" aria-label="Fond de carte">
+      <button type="button" data-v="plan" aria-pressed="true">Plan</button>
+      <button type="button" data-v="sat" aria-pressed="false">Satellite</button>
+      <button type="button" data-v="none" aria-pressed="false">Aucun</button>
+    </div>
+    <div class="float legend" id="legend">
+      <h4>Légende</h4>
+      <label><input type="checkbox" id="tg-ilots" checked><span class="sw ilot"></span>Îlot</label>
+      <label><input type="checkbox" id="tg-lots" checked><span class="sw lot"></span>Lot</label>
+      <label><input type="checkbox" id="tg-limites" checked><span class="sw limite"></span>Limite de lotissement</label>
+      <label><input type="checkbox" id="tg-communes" checked><span class="sw commune"></span>Limite de commune</label>
+      <label><input type="checkbox" id="tg-chev" checked><span class="sw chev"></span>Chevauchement de lotissements</label>
+      <div class="key"><span class="sw limite nc"></span>Limite en tirets : non conforme</div>
+      <hr>
+      <label><input type="checkbox" id="tg-labels" checked>Étiquettes</label>
+    </div>
+    <section class="tableview" id="tableview" hidden aria-label="Tableau des plans">
+      <div class="tv-head">
+        <div><h2>Plans reçus et convertis</h2><p id="tv-sub"></p></div>
+        <div class="tv-actions"><button class="linkbtn" id="btn-csv" type="button">Exporter en CSV</button><button class="linkbtn" id="btn-close" type="button">Retour à la carte</button></div>
+      </div>
+      <div class="tv-scroll"><table><thead id="tv-thead"></thead><tbody id="tv-body"></tbody></table></div>
+    </section>
+  </main>
+</div>
+
+<script src="lib/maplibre-gl.js"></script>
+<script src="lib/glyphs.js"></script>
+<script src="data/plans.js"></script>
+<script src="data/communes.js"></script>
+<script src="data/limites_marcory.js"></script><script src="data/limites_bingerville.js"></script>
+<script src="data/ilots_marcory.js"></script><script src="data/ilots_bingerville.js"></script>
+<script src="data/lots_marcory.js"></script><script src="data/lots_bingerville.js"></script>
+<script src="data/chevauchements.js"></script><script src="data/chevauchements_etiquettes.js"></script>
+<script>
+(function(){
+"use strict";
+const $=s=>document.querySelector(s);
+const P=window.PLANS;
+const nf=new Intl.NumberFormat("fr-FR");
+const fx=(n,d=1)=>n==null?"—":Number(n).toLocaleString("fr-FR",{minimumFractionDigits:d,maximumFractionDigits:d});
+const deacc=s=>String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const title=s=>String(s||"").toLowerCase().replace(/(^|[\s\-'’])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase());
+const COM={MARCORY:"Marcory",BINGERVILLE:"Bingerville"};
+const COLORS={ilot:"#2E9B4A",lot:"#D8362F",limite:"#7A2FBF",commune:"#1F2A37",chev:"#E8750A",chevA:"#1F5FBF",chevB:"#C62828"};
+
+const state={commune:"ALL",type:"ALL",conforme:"ALL",chev:"ALL",q:"",sel:null,sort:{key:"id",dir:1}};
+let vis=[],map,ready=false;
+/* liens directs : ?commune=MARCORY&type=Normale&conforme=non&chev=oui&q=texte&plan=5&ll=-3.98,5.30&z=17&base=sat&table=1 */
+const qs=new URLSearchParams(location.search);
+if(qs.get("commune")) state.commune=qs.get("commune");
+if(qs.get("type")) state.type=qs.get("type");
+if(qs.get("conforme")) state.conforme=qs.get("conforme");
+if(qs.get("chev")) state.chev=qs.get("chev");
+if(qs.get("q")){state.q=qs.get("q"); $("#q").value=state.q;}
+const SEGS=[["#seg-commune","commune"],["#seg-type","type"],["#seg-conforme","conforme"],["#seg-chev","chev"]];
+SEGS.forEach(([id,k])=>$(id).querySelectorAll("button").forEach(b=>{b.dataset.label=b.textContent; b.setAttribute("aria-pressed",String(b.dataset.v===state[k]));}));
+
+/* ---------- donnees derivees ---------- */
+const areaTxt=(ha,m2)=>ha>=0.1?fx(ha,2)+" ha":nf.format(m2!=null?m2:Math.round(ha*1e4))+" m²";
+const yn=v=>v==="oui"?"Oui":v==="non"?"Non":null;
+function alerts(p){
+  const a=[];
+  if(p.conforme==="non") a.push(["err","Lotissement non conforme."]);
+  else if(p.conforme==="oui") a.push(["ok","Lotissement conforme."]);
+  if(p.chev_n) a.push(["warn","Se chevauche avec "+p.chev_n+" lotissement"+(p.chev_n>1?"s":"")+" ("+p.chevauche.map(c=>P[c.id].nom).join(", ")+")."]);
+  if(!p.georef) a.push(["err","Plan non géoréférencé : coordonnées locales, impossible à placer sur la carte. À retourner à la direction pour correction."]);
+  if(p.crs==="Clarke 1880") a.push(["warn","Système déclaré Clarke 1880 : calage à contrôler sur imagerie."]);
+  if(p.crs==="Non indiqué") a.push(["info","Système de coordonnées absent du cartouche."]);
+  if(p.crs_assumed) a.push(["info","Projection absente des fichiers convertis : UTM 30N appliqué."]);
+  if(p.georef&&p.limite_source!=="plan") a.push(["info","Limite non tracée sur le plan : dérivée des îlots."]);
+  if(p.n_lots_raw&&p.n_lots_art/p.n_lots_raw>.5) a.unshift(["err","Conversion à reprendre : "+nf.format(p.n_lots_art)+" des "+nf.format(p.n_lots_raw)+" lots convertis sont des polygones filiformes (lignes non fermées dans le DWG)."]);
+  else if(p.n_lots_art+p.n_ilots_art>0) a.push(["info",nf.format(p.n_lots_art)+" lot(s) et "+nf.format(p.n_ilots_art)+" îlot(s) filiformes (artefacts de conversion) écartés de la carte."]);
+  const num=p.n_lots?p.n_lots_num/p.n_lots:0;
+  if(num<.5) a.push(["warn","Numéros de lots absents du plan ("+fx(num*100,0)+" % de lots numérotés)."]);
+  if(p.overlap_lots_n>0) a.push(["warn",p.overlap_lots_n+" chevauchement(s) entre lots ("+fx(p.overlap_lots_m2,1)+" m²)."]);
+  return a;
+}
+const badgeType=p=>'<span class="badge '+(p.type==="Régularisation"?"reg":"nor")+'">'+esc(p.type)+"</span>";
+const badgeConf=p=>p.conforme==="non"?'<span class="badge nconf">Non conforme</span>':p.conforme==="oui"?'<span class="badge conf">Conforme</span>':"";
+const badgeChev=p=>p.chev_n?'<span class="badge chev">Se chevauche · '+p.chev_n+"</span>":"";
+function zoneBadge(p){
+  if(!p.georef) return '<span class="badge alert">Non géoréférencé</span>';
+  if(p.n_lots_raw&&p.n_lots_art/p.n_lots_raw>.5) return '<span class="badge alert">Conversion à reprendre</span>';
+  return "";
+}
+
+/* ---------- filtrage / rendu ---------- */
+const segVal={commune:p=>p.commune,type:p=>p.type,conforme:p=>p.conforme,chev:p=>p.chev_n?"oui":"non"};
+/* skip : filtre ignoré, pour compter les plans que chaque bouton ferait apparaître */
+function matches(p,skip){
+  for(const k of Object.keys(segVal)) if(k!==skip&&state[k]!=="ALL"&&segVal[k](p)!==state[k]) return false;
+  if(state.q){
+    const hay=deacc([p.nom,p.localite,p.sousprefecture,p.section,p.numero,COM[p.commune],p.conforme==="non"?"non conforme":"conforme",p.chev_n?"chevauchement chevauche":""].join(" "));
+    return deacc(state.q).split(/\s+/).filter(Boolean).every(t=>hay.includes(t));
+  }
+  return true;
+}
+function segCounts(){
+  SEGS.forEach(([id,k])=>$(id).querySelectorAll("button").forEach(b=>{
+    const n=P.filter(p=>matches(p,k)&&(b.dataset.v==="ALL"||segVal[k](p)===b.dataset.v)).length;
+    b.innerHTML=esc(b.dataset.label)+'<span class="cnt">'+n+"</span>";
+  }));
+}
+function render(opts){
+  vis=P.filter(p=>matches(p)); segCounts();
+  $("#k-plans").textContent=nf.format(vis.length);
+  $("#k-lots").textContent=nf.format(vis.reduce((s,p)=>s+p.n_lots,0));
+  $("#k-ilots").textContent=nf.format(vis.reduce((s,p)=>s+p.n_ilots,0));
+  $("#count").textContent=vis.length+(vis.length>1?" plans":" plan");
+  const ul=$("#list");
+  ul.innerHTML=vis.length?vis.map(p=>
+    '<li><button class="plan" type="button" data-id="'+p.id+'"'+(p.id===state.sel?' aria-current="true"':"")+'>'+
+    '<span class="plan-name">'+esc(p.nom)+"</span>"+
+    '<span class="plan-sub">'+esc(p.localite)+" · "+esc(COM[p.commune])+"</span>"+
+    '<span class="plan-meta">'+badgeType(p)+badgeConf(p)+badgeChev(p)+'<span class="num">'+nf.format(p.n_lots)+' lots</span>'+zoneBadge(p)+"</span></button></li>").join(""):
+    '<li class="empty">Aucun lotissement ne correspond à cette recherche.</li>';
+  if(!$("#tableview").hidden) renderTable();
+  if(ready){applyMapFilter(); if(opts&&opts.fit) fitPlans(vis);}
+}
+
+/* ---------- fiche ---------- */
+function showDetail(p){
+  const rows=[
+    ["Commune",COM[p.commune]],["Localité",p.localite],["Sous-préfecture",title(p.sousprefecture)],
+    ["Section cadastrale",p.section],["Type de plan",p.type+(p.type_detail?" ("+p.type_detail.toLowerCase()+")":"")],
+    ["Lotissement conforme",yn(p.conforme)],["Polygonale",yn(p.polygonale)],
+    ["Date d’édition",p.date],["N° d’édition",p.numero],["Échelle",p.echelle],["Système de coordonnées",p.crs],
+    ["Source",p.fichier]
+  ].filter(r=>r[1]!=null&&r[1]!=="");
+  const d=$("#detail");
+  d.innerHTML='<button class="back" type="button" id="back">← Tous les plans</button><h2>'+esc(p.nom)+'</h2>'+
+    '<div class="chips">'+badgeType(p)+badgeConf(p)+badgeChev(p)+'<span class="chip">'+esc(COM[p.commune])+"</span>"+(p.georef?"":'<span class="chip">non cartographié</span>')+"</div>"+
+    '<dl class="meta">'+rows.map(r=>"<dt>"+esc(r[0])+"</dt><dd"+(/N°|Échelle|Date|Superficie|Lots|Îlots/.test(r[0])?' class="num"':"")+">"+esc(r[1])+"</dd>").join("")+"</dl>"+
+    "<h3>Contrôle</h3><ul class=\"alerts\">"+alerts(p).map(a=>'<li class="'+a[0]+'">'+esc(a[1])+"</li>").join("")+"</ul>"+
+    (p.chev_n?"<h3>Chevauchements ("+p.chev_n+")</h3><ul class=\"chevlist\">"+p.chevauche.map(c=>{
+      const o=P[c.id],inside=c.pct>=99.5?" · ce lotissement est entièrement compris dans l’autre":"";
+      return '<li><a class="nm" data-plan="'+o.id+'">'+esc(o.nom)+'</a>'+
+        '<span class="sub">'+esc(COM[o.commune])+" · "+esc(o.type)+(o.conforme==="non"?" · non conforme":"")+"</span>"+
+        '<span class="zone num">'+areaTxt(c.ha,c.m2)+" en commun · "+fx(c.pct,1)+" % de ce lotissement</span>"+
+        '<span class="sub">'+(c.n?nf.format(c.n)+" lot"+(c.n>1?"s":"")+" se superpose"+(c.n>1?"nt":"")+(c.same?" (dont "+nf.format(c.same)+" identique"+(c.same>1?"s":"")+")":""):"Seules les limites se recouvrent")+inside+"</span>"+
+        '<span><a data-bbox="'+c.bbox.join(",")+'">Voir la zone sur la carte</a></span></li>';}).join("")+"</ul>":"");
+  $("#back").onclick=clearSelection;
+}
+function selectPlan(id,fit){
+  const p=P[id]; state.sel=id;
+  $("#detail").hidden=false; $("#list").hidden=true; $("#list-head").hidden=true;
+  showDetail(p); $("#tableview").hidden=true;
+  document.querySelectorAll(".plan").forEach(b=>b.toggleAttribute("aria-current",+b.dataset.id===id));
+  if(ready){
+    map.setFilter("limites-sel",["==",["get","p"],id]);
+    if(fit!==false&&p.bbox) map.fitBounds([[p.bbox[0],p.bbox[1]],[p.bbox[2],p.bbox[3]]],{padding:fitPad(),maxZoom:17.5,duration:900});
+  }
+}
+function clearSelection(){
+  state.sel=null; $("#detail").hidden=true; $("#list").hidden=false; $("#list-head").hidden=false;
+  if(ready) map.setFilter("limites-sel",["==",["get","p"],-1]);
+  render({fit:false});
+}
+
+/* ---------- tableau ---------- */
+const SEQ={}; P.forEach(p=>{SEQ[p.commune]=(SEQ[p.commune]||0)+1; p.n=SEQ[p.commune];});
+const COLS=[
+  ["n","N°",p=>p.n,"n"],["nom","Lotissement",p=>p.nom,"name"],["commune","Commune",p=>COM[p.commune]],
+  ["localite","Localité",p=>p.localite],["sousprefecture","Sous-préfecture",p=>title(p.sousprefecture)],
+  ["type","Type",p=>p.type],["conforme","Conforme",p=>yn(p.conforme)||"—"],["polygonale","Polygonale",p=>yn(p.polygonale)||"—"],
+  ["chev_n","Se chevauche avec",p=>p.chev_n?p.chevauche.map(c=>P[c.id].nom+" ("+areaTxt(c.ha,c.m2)+")").join(" ; "):"—"],
+  ["date_iso","Date d’édition",p=>p.date||"—","n"],["numero","N° d’édition",p=>p.numero||"—","n"],
+  ["echelle","Échelle",p=>p.echelle||"—","n"],["crs","Système de coordonnées",p=>p.crs]
+];
+function sortedVis(){
+  const {key,dir}=state.sort;
+  return vis.slice().sort((a,b)=>{
+    const x=a[key],y=b[key];
+    if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1;
+    return (typeof x==="number"&&typeof y==="number"?x-y:String(x).localeCompare(String(y),"fr"))*dir;
+  });
+}
+function renderTable(){
+  $("#tv-sub").textContent=vis.length+" plan(s) · filtres de la colonne de gauche appliqués";
+  $("#tv-thead").innerHTML="<tr>"+COLS.map(c=>'<th data-k="'+c[0]+'"'+(state.sort.key===c[0]?' aria-sort="'+(state.sort.dir>0?"ascending":"descending")+'"':"")+">"+c[1]+"</th>").join("")+"</tr>";
+  $("#tv-body").innerHTML=sortedVis().map(p=>'<tr data-id="'+p.id+'">'+COLS.map(c=>'<td'+(c[3]?' class="'+c[3]+'"':"")+">"+esc(c[2](p))+"</td>").join("")+"</tr>").join("");
+}
+function toCSV(){
+  const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const lines=[COLS.map(c=>q(c[1])).join(";")].concat(sortedVis().map(p=>COLS.map(c=>q(c[2](p))).join(";")));
+  const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="plans_marcory_bingerville.csv";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+/* ---------- carte ---------- */
+function panelWidth(){return window.matchMedia("(max-width:860px)").matches?0:392}
+function fitPad(){return {top:60,bottom:60,right:60,left:panelWidth()?60:60}}
+function fitPlans(list){
+  const g=list.filter(p=>p.georef&&p.bbox); if(!g.length) return;
+  let w=1e9,s=1e9,e=-1e9,n=-1e9;
+  g.forEach(p=>{w=Math.min(w,p.bbox[0]);s=Math.min(s,p.bbox[1]);e=Math.max(e,p.bbox[2]);n=Math.max(n,p.bbox[3]);});
+  map.fitBounds([[w,s],[e,n]],{padding:fitPad(),maxZoom:17,duration:800});
+}
+const merge=(...a)=>({type:"FeatureCollection",features:a.flatMap(x=>x.features)});
+const LAYERS={
+  ilots:["ilots-fill","ilots-line","ilots-label"],lots:["lots-fill","lots-line","lots-label"],
+  limites:["limites-casing","limites-fill","limites-line","limites-line-nc","limites-sel","limites-label"],communes:["communes-line","communes-label"],
+  chev:["chev-bg","chev-fill","chev-line","chev-label"]
+};
+const LABELS=["ilots-label","lots-label","limites-label","communes-label","chev-label"];
+const DATA_LAYERS=["limites-casing","limites-fill","limites-line","limites-line-nc","limites-label","ilots-fill","ilots-line","ilots-label","lots-fill","lots-line","lots-label"];
+const CHEV_LAYERS=LAYERS.chev;
+/* limites conformes en trait plein, non conformes en tirets : le filtre de style de ces deux couches s'ajoute à celui des plans affichés */
+const EXTRA={"limites-line":["!=",["get","c"],"non"],"limites-line-nc":["==",["get","c"],"non"]};
+function applyMapFilter(){
+  const ids=vis.filter(p=>p.georef).map(p=>p.id);
+  const f=["in",["get","p"],["literal",ids]];
+  DATA_LAYERS.forEach(l=>map.setFilter(l,EXTRA[l]?["all",f,EXTRA[l]]:f));
+  const fc=["any",["in",["get","a"],["literal",ids]],["in",["get","b"],["literal",ids]]];
+  CHEV_LAYERS.forEach(l=>map.setFilter(l,fc));
+}
+function hatchImage(){
+  const s=16,c=document.createElement("canvas"); c.width=c.height=s; const x=c.getContext("2d");
+  x.strokeStyle=COLORS.chev; x.lineWidth=2.2; x.beginPath();
+  [[0,s,s,0],[-s/2,s/2,s/2,-s/2],[s/2,s*1.5,s*1.5,s/2]].forEach(l=>{x.moveTo(l[0],l[1]); x.lineTo(l[2],l[3]);});
+  x.stroke(); return x.getImageData(0,0,s,s);
+}
+function zoomTo(bbox){map.fitBounds([[bbox[0],bbox[1]],[bbox[2],bbox[3]]],{padding:fitPad(),maxZoom:18.5,duration:900});}
+function setVis(ids,on){ids.forEach(l=>map.setLayoutProperty(l,"visibility",on?"visible":"none"));}
+function syncToggles(){
+  const lab=$("#tg-labels").checked;
+  Object.keys(LAYERS).forEach(k=>{
+    const on=$("#tg-"+k).checked;
+    LAYERS[k].forEach(l=>map.setLayoutProperty(l,"visibility",on&&(lab||!LABELS.includes(l))?"visible":"none"));
+  });
+}
+function setBasemap(v){
+  map.setLayoutProperty("carto","visibility",v==="plan"?"visible":"none");
+  map.setLayoutProperty("cartoref","visibility",v==="plan"?"visible":"none");
+  map.setLayoutProperty("esri","visibility",v==="sat"?"visible":"none");
+  document.querySelectorAll("#basemap button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===v)));
+}
+/* glyphes des étiquettes : fournis par lib/glyphs.js (protocole « glyph: »), donc sans réseau et sans fetch() sur file:// */
+function glyphProtocol(){
+  maplibregl.addProtocol("glyph",params=>{
+    const m=/\/(\d+-\d+)\.pbf$/.exec(params.url),b=m&&window.GLYPHS&&window.GLYPHS[m[1]];
+    if(!b) return Promise.resolve({data:new ArrayBuffer(0)});
+    const s=atob(b),a=new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i);
+    return Promise.resolve({data:a.buffer});
+  });
+}
+/* fonds de carte Esri : indisponibles sans connexion, on bascule sur « Aucun » et on grise Plan / Satellite */
+let offline=false,userBase=null;
+function setOffline(off){
+  if(off===offline) return; offline=off;
+  document.querySelectorAll("#basemap button").forEach(b=>{if(b.dataset.v!=="none"){b.disabled=off; b.title=off?"Hors connexion : fond de carte indisponible":"";}});
+  if(ready){ if(off){userBase=document.querySelector('#basemap button[aria-pressed="true"]').dataset.v; setBasemap("none");} else if(userBase&&userBase!=="none"){setBasemap(userBase); userBase=null;} }
+}
+function initMap(){
+  const t=(u)=>["a","b","c"].map(s=>u.replace("{s}",s));
+  glyphProtocol();
+  map=new maplibregl.Map({
+    container:"map",center:[-3.95,5.33],zoom:9.6,attributionControl:{compact:true},
+    style:{version:8,glyphs:"glyph://{fontstack}/{range}.pbf",
+      sources:{
+        carto:{type:"raster",tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"],tileSize:256,maxzoom:16,attribution:"Fond © Esri, HERE, Garmin, OpenStreetMap contributors"},
+        cartoref:{type:"raster",tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}"],tileSize:256,maxzoom:16},
+        esri:{type:"raster",tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],tileSize:256,maxzoom:19,attribution:"Imagerie © Esri, Maxar, Earthstar Geographics"}
+      },
+      layers:[{id:"bg",type:"background",paint:{"background-color":"#F1F4F2"}},
+        {id:"carto",type:"raster",source:"carto"},
+        {id:"esri",type:"raster",source:"esri",layout:{visibility:"none"}},
+        {id:"cartoref",type:"raster",source:"cartoref"}]}
+  });
+  window.atlasMap=map;
+  let bmOk=0,bmErr=0; const isBase=e=>e&&(e.sourceId==="carto"||e.sourceId==="cartoref"||e.sourceId==="esri");
+  map.on("data",e=>{if(e.dataType==="source"&&e.tile&&isBase(e)) bmOk++;});
+  map.on("error",e=>{console.warn("carte :",e&&e.error&&e.error.message||e); if(isBase(e)&&!bmOk&&++bmErr>=6) setOffline(true);});
+  window.addEventListener("offline",()=>setOffline(true)); window.addEventListener("online",()=>{bmErr=0; setOffline(false);});
+  map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-right");
+  map.addControl(new maplibregl.ScaleControl({unit:"metric"}),"bottom-right");
+  /* style.load : les couches de donnees ne doivent pas attendre le chargement des tuiles du fond de carte */
+  map.once("style.load",()=>{
+    map.addSource("communes",{type:"geojson",data:window.COMMUNES});
+    map.addSource("limites",{type:"geojson",data:merge(window.LIMITES_MARCORY,window.LIMITES_BINGERVILLE)});
+    map.addSource("ilots",{type:"geojson",data:merge(window.ILOTS_MARCORY,window.ILOTS_BINGERVILLE)});
+    map.addSource("lots",{type:"geojson",data:merge(window.LOTS_MARCORY,window.LOTS_BINGERVILLE)});
+    map.addSource("chev",{type:"geojson",data:window.CHEVAUCHEMENTS});
+    map.addSource("chevpts",{type:"geojson",data:window.CHEVAUCHEMENTS_PTS});
+    map.addImage("hatch",hatchImage(),{pixelRatio:2});
+    const L=(o)=>map.addLayer(o);
+    L({id:"communes-line",type:"line",source:"communes",paint:{"line-color":COLORS.commune,"line-width":2,"line-dasharray":[3,2],"line-opacity":.85}});
+    L({id:"ilots-fill",type:"fill",source:"ilots",paint:{"fill-color":COLORS.ilot,"fill-opacity":.2}});
+    L({id:"lots-fill",type:"fill",source:"lots",paint:{"fill-color":COLORS.lot,"fill-opacity":.26}});
+    L({id:"lots-line",type:"line",source:"lots",minzoom:13,paint:{"line-color":COLORS.lot,"line-width":["interpolate",["linear"],["zoom"],13,.2,18,1]}});
+    L({id:"ilots-line",type:"line",source:"ilots",paint:{"line-color":COLORS.ilot,"line-width":["interpolate",["linear"],["zoom"],11,.5,16,2.2]}});
+    L({id:"chev-bg",type:"fill",source:"chev",paint:{"fill-color":COLORS.chev,"fill-opacity":.3}});
+    L({id:"chev-fill",type:"fill",source:"chev",paint:{"fill-pattern":"hatch"}});
+    L({id:"chev-line",type:"line",source:"chev",paint:{"line-color":COLORS.chev,"line-width":["interpolate",["linear"],["zoom"],9,1.6,16,3]}});
+    L({id:"limites-casing",type:"line",source:"limites",paint:{"line-color":"#FFFFFF","line-opacity":.8,"line-width":["interpolate",["linear"],["zoom"],9,2.5,16,6]}});
+    L({id:"limites-fill",type:"fill",source:"limites",paint:{"fill-color":COLORS.limite,"fill-opacity":.04}});
+    L({id:"limites-line",type:"line",source:"limites",paint:{"line-color":COLORS.limite,"line-width":["interpolate",["linear"],["zoom"],9,1.4,16,3.2]}});
+    L({id:"limites-line-nc",type:"line",source:"limites",paint:{"line-color":COLORS.limite,"line-width":["interpolate",["linear"],["zoom"],9,1.4,16,3.2],"line-dasharray":[2.2,1.4]}});
+    L({id:"limites-sel",type:"line",source:"limites",filter:["==",["get","p"],-1],paint:{"line-color":COLORS.limite,"line-width":6,"line-opacity":.55}});
+    const halo={"text-halo-color":"#FFFFFF","text-halo-width":1.8};
+    L({id:"communes-label",type:"symbol",source:"communes",maxzoom:13,layout:{"text-field":["get","name"],"text-font":["Open Sans Semibold"],"text-size":15,"text-letter-spacing":.35,"text-offset":[0,-1.6]},paint:{"text-color":COLORS.commune,"text-halo-color":"#FFFFFF","text-halo-width":2}});
+    L({id:"ilots-label",type:"symbol",source:"ilots",minzoom:15.3,layout:{"text-field":["coalesce",["get","n"],""],"text-font":["Open Sans Semibold"],"text-size":["interpolate",["linear"],["zoom"],15.3,10,19,19],"text-optional":true},paint:Object.assign({"text-color":"#17703A"},halo)});
+    L({id:"lots-label",type:"symbol",source:"lots",minzoom:17,layout:{"text-field":["coalesce",["get","n"],""],"text-font":["Open Sans Semibold"],"text-size":["interpolate",["linear"],["zoom"],17,8.5,20,13],"text-optional":true,"text-padding":1},paint:Object.assign({"text-color":"#B3231D"},halo)});
+    L({id:"limites-label",type:"symbol",source:"limites",minzoom:10.4,layout:{"text-field":["get","name"],"text-font":["Open Sans Semibold"],"text-size":["interpolate",["linear"],["zoom"],10.4,10,15,14],"text-max-width":9,"text-padding":4},paint:{"text-color":"#5E1F99","text-halo-color":"#FFFFFF","text-halo-width":2}});
+    L({id:"chev-label",type:"symbol",source:"chevpts",minzoom:13,layout:{"text-field":["format",["get","na"],{"text-color":COLORS.chevA},"  –  ",{"text-color":"#4A5560"},["get","nb"],{"text-color":COLORS.chevB}],"text-font":["Open Sans Semibold"],"text-size":["interpolate",["linear"],["zoom"],13,10,18,14],"text-max-width":16,"text-padding":6,"text-allow-overlap":true},paint:{"text-color":COLORS.chevA,"text-halo-color":"#FFFFFF","text-halo-width":2.4}});
+    ready=true; applyMapFilter();
+    const ll=qs.get("ll"),zq=qs.get("z");
+    if(ll&&zq){const c=ll.split(",").map(Number); map.jumpTo({center:c,zoom:+zq});} else fitPlans(vis);
+    if(qs.get("base")) setBasemap(qs.get("base"));
+    if(!navigator.onLine) setOffline(true);
+    if(qs.get("plan")!=null) selectPlan(+qs.get("plan"),!(ll&&zq));
+    if(qs.get("table")){$("#tableview").hidden=false; renderTable();}
+    // clic : fiche du plan ou information sur le lot / l'ilot
+    const CLICKABLE=["chev-bg","lots-fill","ilots-fill","limites-fill"];
+    map.on("click",e=>{
+      const f=map.queryRenderedFeatures(e.point,{layers:CLICKABLE.filter(l=>map.getLayoutProperty(l,"visibility")!=="none")});
+      if(!f.length) return;
+      const zone=f.find(x=>x.layer.id==="chev-bg"),top=f.find(x=>x.layer.id!=="chev-bg"); let html="";
+      if(top){
+        const p=P[top.properties.p];
+        const il=top.properties.i&&!/^ILOT_\d+$/.test(top.properties.i)?top.properties.i:null;
+        const st=esc(p.type)+" · "+(p.conforme==="non"?"<b style=\"color:#B3261E\">non conforme</b>":p.conforme==="oui"?"conforme":"conformité non renseignée");
+        if(top.layer.id==="limites-fill") html="<b>"+esc(p.nom)+"</b><br>"+st+'<br><a data-plan="'+p.id+'">Voir la fiche</a>';
+        else{
+          html=(top.layer.id==="lots-fill"?"<b>Lot "+esc(top.properties.n||"sans numéro")+"</b><br>"+(il?"Îlot "+esc(il)+"<br>":""):"<b>Îlot "+esc(top.properties.n||"sans numéro")+"</b><br>")+esc(p.nom)+"<br>"+st+' · <a data-plan="'+p.id+'">Voir la fiche</a>';
+        }
+      }
+      if(zone){
+        const za=P[zone.properties.a],zb=P[zone.properties.b];
+        html+=(html?'<hr style="border:0;border-top:1px solid #D9E1DD;margin:7px 0">':"")+'<b style="color:#A44D00">Chevauchement</b> · '+areaTxt(zone.properties.ha,null)+"<br>"+
+          '<a data-plan="'+za.id+'">'+esc(za.nom)+'</a><br>× <a data-plan="'+zb.id+'">'+esc(zb.nom)+"</a>";
+      }
+      new maplibregl.Popup({closeButton:false,maxWidth:"280px"}).setLngLat(e.lngLat).setHTML('<div class="pop">'+html+"</div>").addTo(map);
+    });
+    map.on("mousemove",e=>{map.getCanvas().style.cursor=map.queryRenderedFeatures(e.point,{layers:["lots-fill","limites-fill","chev-bg"]}).length?"pointer":"";});
+  });
+}
+
+/* ---------- evenements ---------- */
+function seg(id,key){
+  $(id).addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    state[key]=b.dataset.v;
+    $(id).querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+    if(state.sel!=null) clearSelection();
+    render({fit:true});
+  });
+}
+SEGS.forEach(([id,k])=>seg(id,k));
+let tq; $("#q").addEventListener("input",e=>{state.q=e.target.value.trim(); clearTimeout(tq); tq=setTimeout(()=>{if(state.sel!=null) clearSelection(); render({fit:true});},180);});
+$("#list").addEventListener("click",e=>{const b=e.target.closest(".plan"); if(b){selectPlan(+b.dataset.id); document.getElementById("app").classList.remove("open");}});
+$("#btn-table").onclick=()=>{$("#tableview").hidden=false; renderTable(); document.getElementById("app").classList.remove("open");};
+$("#btn-close").onclick=()=>{$("#tableview").hidden=true;};
+$("#btn-csv").onclick=toCSV;
+$("#tv-thead").addEventListener("click",e=>{const th=e.target.closest("th"); if(!th) return; const k=th.dataset.k; state.sort=state.sort.key===k?{key:k,dir:-state.sort.dir}:{key:k,dir:1}; renderTable();});
+$("#tv-body").addEventListener("click",e=>{const tr=e.target.closest("tr"); if(tr) selectPlan(+tr.dataset.id);});
+$("#basemap").addEventListener("click",e=>{const b=e.target.closest("button"); if(b&&ready) setBasemap(b.dataset.v);});
+["ilots","lots","limites","communes","chev","labels"].forEach(k=>$("#tg-"+k).addEventListener("change",()=>ready&&syncToggles()));
+$("#ptoggle").onclick=()=>document.getElementById("app").classList.toggle("open");
+document.addEventListener("click",e=>{
+  const z=e.target.closest("a[data-bbox]"); if(z&&ready){zoomTo(z.dataset.bbox.split(",").map(Number)); document.getElementById("app").classList.remove("open"); return;}
+  const a=e.target.closest("a[data-plan]"); if(a) selectPlan(+a.dataset.plan);
+});
+
+render(); initMap();
+})();
+</script>
+</body>
+</html>

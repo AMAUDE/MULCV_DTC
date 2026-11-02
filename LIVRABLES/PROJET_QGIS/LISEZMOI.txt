@@ -1,0 +1,65 @@
+PROJET QGIS DE L'ATLAS DES LOTISSEMENTS (version « assemblage »)
+================================================================
+
+Source des données : marcory_bingerville.gpkg
+  Votre couche d'assemblage, située dans le dossier « converti marcory DTC » (le projet la lit
+  à cet endroit, sans la copier). Deux couches sont utilisées :
+    assemblage_01_dtc          les lots de Marcory et de Bingerville (champs lotissement, ilot, nom_lot, info)
+    limites_de_lotissement     un polygone par plan, avec ses métadonnées et :
+                                 type        Normale / Régularisation
+                                 conforme    oui / non
+                                 polygonale  OUI / non
+
+Fichiers de ce dossier
+  ATLAS_LOTISSEMENTS.qgz        projet QGIS (EPSG:32630, WGS 84 / UTM 30N)
+  controle_plateforme.gpkg      résultats du contrôle, réécrits à chaque mise à jour (ne pas modifier) :
+                                  chevauchements, ilots_reconstitues, plans_synthese
+  communes.gpkg                 limites de Marcory et de Bingerville
+  mettre_a_jour_plateforme.bat  met à jour la plateforme après vos modifications (double-clic)
+  mettre_a_jour_plateforme.py   script appelé par le .bat (Python avec geopandas, shapely, pyproj)
+  ancien\                       version précédente du projet, du script et des données de la plateforme
+
+Couches du projet (de haut en bas)
+  Chevauchements de lotissements   zones d'au moins 0,5 ha où deux lotissements se recouvrent (hachures orange)
+  Chevauchements mineurs           zones plus petites, non montrées sur la plateforme (masquée)
+  Limites de lotissement (plans)   violet ; en tirets lorsque le lotissement n'est pas conforme
+  Lots (assemblage)                rouge, numéro de lot affiché à grande échelle
+  Îlots (reconstitués)             vert, obtenus en regroupant les lots qui ont le même numéro d'îlot
+  Limites de commune               tirets
+  Synthèse des plans (contrôle)    masquée : une ligne par plan avec lots, îlots, superficie, chevauchements
+  Imagerie Esri / Fond gris Esri   fonds de carte (internet requis)
+
+Ce que vous pouvez modifier (dans marcory_bingerville.gpkg)
+  - Les attributs des plans : type, conforme, polygonale, localité, sous-préfecture, date,
+    n° d'édition, échelle... (listes de choix pour type, conforme et polygonale).
+  - Les limites, les lots, les numéros de lot et d'îlot.
+  Enregistrer les modifications des couches dans QGIS, puis fermer l'édition avant de mettre à jour.
+
+Mettre à jour la plateforme
+  Double-cliquer sur mettre_a_jour_plateforme.bat, puis recharger index.html (Ctrl+F5).
+  Dans QGIS, recharger les couches de contrôle (clic droit > Recharger, ou F5).
+  Autre fichier d'assemblage :   python mettre_a_jour_plateforme.py --gpkg "chemin\fichier.gpkg"
+
+Ce que calcule le script
+  - Rattachement des lots à leur plan par le champ « lotissement » (un nom d'assemblage = un plan ;
+    vérification spatiale, la correspondance est affichée à l'écran).
+  - Chevauchement entre lotissements : zone où les limites de deux plans se recouvrent, réunie aux
+    zones où des lots de deux plans différents se superposent (lots identiques ou partiels).
+    Seules les zones d'au moins 0,5 ha sont montrées sur la plateforme (réglage SEUIL_CHEVAUCHEMENT_M2
+    en haut du script). Les zones de 100 m² à 0,5 ha sont listées à l'écran et dans la couche
+    chevauchements_mineurs (masquée dans le projet) ; en dessous de 100 m² il s'agit d'une bavure
+    de tracé le long d'une limite commune, ignorée.
+  - Superficies calculées sur la géométrie (le champ surface_m2 est ignoré : il est faux pour AGOUAPI).
+  - Polygones filiformes (artefacts de conversion) écartés : surface / périmètre < 0,4 m.
+  - Contrôle de zone (part de l'emprise dans la commune), lots numérotés, chevauchements de lots
+    à l'intérieur d'un même plan, emprise de zoom, date triable.
+  - La sous-préfecture laissée vide est déduite de souspref509.shp lorsque ce fichier est disponible.
+
+Points d'attention
+  - Les 4 plans « non conformes » (AGBASSI, DJANGON AKANDJÉ, N'DOU POPOTO, N'MOKET RÉSIDENTIEL)
+    sont affichés tels que renseignés dans la couche ; le script ne recalcule pas la conformité.
+  - Le plan 16 (ADJIN PALMERAIE) figure deux fois dans limites_de_lotissement : une ligne vide
+    (superficie nulle) est ignorée.
+  - Le plan 35 se nomme « (BAGBA 1ʳᵉ EXTension ÉNERGIE SOLAIRE » : la parenthèse n'est pas refermée.
+  - Les fichiers atlas_lotissements.gpkg* de cette version précédente peuvent être rangés dans
+    ancien\ une fois QGIS fermé (ils ne sont plus utilisés).

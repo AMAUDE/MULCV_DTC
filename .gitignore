@@ -1,0 +1,5 @@
+*.gpkg-wal
+*.gpkg-shm
+*.gpkg-journal
+__pycache__/
+~$*

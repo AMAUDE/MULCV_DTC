@@ -2,6 +2,13 @@
 
 Atlas cartographique des plans de lotissement convertis (DWG vers SHP avec le plugin QGIS Amaude), assemblés en WGS 84 / UTM 30N (EPSG:32630) : plateforme web, projet QGIS et script de mise à jour.
 
+## Voir la plateforme en ligne
+
+La page du dépôt GitHub n'affiche que la liste des fichiers : la carte s'ouvre avec GitHub Pages, à l'adresse
+**https://amaude.github.io/MULCV_DTC/**
+
+Activation (une seule fois, dans le dépôt) : **Settings → Pages → Build and deployment → Source : Deploy from a branch → Branch : `main`, dossier `/ (root)` → Save**. L'adresse est active après une à deux minutes.
+
 ## Contenu
 
 | Dossier / fichier | Rôle |
